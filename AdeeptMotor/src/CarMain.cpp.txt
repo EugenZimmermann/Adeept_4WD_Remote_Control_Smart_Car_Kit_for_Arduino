@@ -1,0 +1,249 @@
+/***********************************************************
+File name:  AdeeptMotor.ino
+Description:  
+1. Under remote control mode: 
+The car is completely controlled by the remote control. 
+2. Under auto-control mode: 
+The ultrasonic module will keep detecting obstacles in front 
+of the car. When encountering and approaching one, the car will 
+go backward, turn to another angle bypassing the obstacle, and 
+continue to go forward. 
+Website: www.adeept.com
+E-mail: support@adeept.com
+Author: Tom
+Date: 2016/12/26 
+***********************************************************/
+#include <Arduino.h>
+#include <SPI.h>
+#include <RF24.h>
+#include <Servo.h>
+
+/*
+ * define variables for serial communication/commands
+ ********************************************************/
+unsigned char cComIn;
+char cCommand;
+unsigned long iComandParamter;
+bool bIsParameter;
+/*********************************************************/
+
+/*********************************************************/
+#include <TaskScheduler.h>
+Scheduler taskManager;
+
+void receiveRF();
+void measureDistance();
+
+#define updateInterval 200
+
+Task tRF            (0, TASK_FOREVER, &receiveRF);
+Task tDistance      (updateInterval, TASK_FOREVER, &measureDistance);
+/*********************************************************/
+
+/*********************************************************/
+// RF24 radio(9, 10);                  // define the object to control NRF24L01
+// byte addresses[6] = "00007";        // define communication address which should correspond to remote control
+// int data[9]={512, 512, 0, 0, 1, 1, 512, 512, 512};  // define array used to save the communication data
+// int mode[1] = {1};
+/*********************************************************/
+
+/*********************************************************/
+#include <NewPing.h>
+#define TRIG_PIN 11                 // define Trig pin for ultrasonic ranging module
+#define ECHO_PIN 12                 // define Echo pin for ultrasonic ranging module
+#define MAX_DIST 300                // define the range(cm) for ultrasonic ranging module, Maximum sensor distance is rated at 400-500cm.
+
+NewPing sonar(TRIG_PIN, ECHO_PIN, MAX_DIST); // NewPing setup of pins and maximum distance.
+
+unsigned long pingTime = -1;        // save the high level time returned by ultrasonic ranging module
+float maxDistance = MAX_DIST;
+float distance = MAX_DIST;          // save the distance away from obstacle
+float soundVelocity = 343.2;        // Sound velocity = 340 m/s
+float rangingTimeOut = 2*MAX_DIST/100/soundVelocity*1000000; // define the timeout(ms) for ultrasonic ranging module
+/*********************************************************/
+
+/*********************************************************/
+const int RPin = A3; 
+const int GPin = A4; 
+const int BPin = A5; 
+int RGBVal = 0;
+int automatic = 0;
+/*********************************************************/
+
+#define FORWARD LOW
+#define BACKWARD HIGH
+
+void setup() {
+    // radio.begin();                      // initialize RF24
+    // radio.setRetries(0, 15);            // set retries times
+    // radio.setPALevel(RF24_PA_LOW);      // set power
+    // radio.openReadingPipe(1, addresses);// open delivery channel
+    // radio.startListening();             // start monitoring
+
+    Serial.begin(9600); // initialize serial port
+
+    // pinMode(RPin, OUTPUT);   // set RPin to output mode
+    // pinMode(GPin, OUTPUT);   // set GPin to output mode
+    // pinMode(BPin, OUTPUT);   // set BPin to output mode
+
+    pinMode(TRIG_PIN, OUTPUT);   // set GPin to output mode
+    digitalWrite(TRIG_PIN, LOW); 
+    pinMode(ECHO_PIN, INPUT);   // set BPin to output mode
+
+    taskManager.init();
+    taskManager.addTask(tDistance);
+    taskManager.addTask(tRF);
+
+    tDistance.enable();
+    tRF.enable();
+
+    Serial.println("Car booted");
+}
+
+void loop()
+{
+    taskManager.execute();
+
+    // check for incomming commands
+    while (Serial.available()) {
+        cComIn = Serial.read();
+        if (cComIn >= '0' && cComIn <='9')
+        {
+            iComandParamter = 10 * iComandParamter + (cComIn -'0');
+            bIsParameter = true;
+        }
+        else if (cComIn == 13){
+            switch (cCommand){
+                case 'U':
+                case 'u':
+                    if (bIsParameter) {
+                        if (iComandParamter >= 0 && iComandParamter<=1023){
+                            ultrasonicServoDegree = iComandParamter;
+                        }
+                    }
+                    break;
+                case 'D':
+                case 'd':
+                    if (bIsParameter) {
+                        if (iComandParamter >=0 && iComandParamter<=100) {
+                            ultrasonicServoOffset = iComandParamter;
+                        }
+                    }
+                    break;
+                case 'P':
+                case 'p':
+                    // if (bIsParameter) {
+                    //     if (iComandParamter == 0) {
+                    //         pumpActive = false;
+                    //         Serial.println("pump inactive");
+                    //     }
+                    //     else if (iComandParamter == 1) {
+                    //         pumpActive = true;
+                    //         Serial.println("pump active");
+                    //     }
+                    // }
+                    // ETout.sendData(); 
+                    break;
+                case 'S':
+                case 's':
+                    break;
+                case 'B':
+                case 'b':
+                    break;
+                case 'M':
+                case 'm':
+                    measureDistance();
+                    Serial.println("Distance: " + String(distance));
+                    break;
+                case 'T':
+                case 't':
+                    break;
+                case 'R':
+                case 'r':
+                    break;
+                case 'L':
+                case 'l':
+                    if (bIsParameter) {
+                        switch (iComandParamter){
+                            case 1:
+                                Serial.println("LED: red");
+                                analogWrite(RPin, 255);
+                                analogWrite(GPin, 0);
+                                analogWrite(BPin, 0);
+                                break;
+                            case 2:
+                                Serial.println("LED: green");
+                                analogWrite(RPin, 0);
+                                analogWrite(GPin, 255);
+                                analogWrite(BPin, 0);
+                                break;
+                            case 3:
+                                Serial.println("LED: blue");
+                                analogWrite(RPin, 0);
+                                analogWrite(GPin, 0);
+                                analogWrite(BPin, 255);
+                                break;
+                            default:
+                                Serial.println("LED: white");
+                                analogWrite(RPin, 255);
+                                analogWrite(GPin, 255);
+                                analogWrite(BPin, 255);
+                                break;
+                        }
+                    }
+            }
+        }
+        else {
+            cCommand = cComIn;
+            iComandParamter = 0; 
+            bIsParameter = false;
+        }
+        ultrasonicServo.write(ultrasonicServoDegree + ultrasonicServoOffset);
+    }
+}
+
+void receiveRF(){
+    // if (radio.available()) {             // if receive the data
+    //     while (radio.available()) {         // read all the data
+    //         radio.read(data, sizeof(data)); // read data
+    //     }
+    //     if(!data[2]){
+    //         RGBVal++ ;
+    //     if(RGBVal>4){
+    //         RGBVal=0;}
+    //     }
+    //     if(!data[3]){
+    //         automatic = 0;
+    //     }
+    //     if(!data[4]){
+    //         automatic = 1;
+    //     }  
+    //     // if (!data[5])// control the buzzer
+    //     //     tone(buzzerPin, 2000);
+    //     // else
+    //     //     noTone(buzzerPin);
+    // }
+}
+
+void measureDistance() {
+    Serial.print(String(sonar.ping_cm()));
+    // set the trigPin output 10us high level to make the ultrasonic ranging module start to measure
+    // digitalWrite(TRIG_PIN, HIGH);
+    // delayMicroseconds(10);
+    // digitalWrite(TRIG_PIN, LOW);
+    // // get the high level time returned by ultrasonic ranging module
+    // pingTime = pulseIn(ECHO_PIN, HIGH);
+    // Serial.print("Ping Time: ");
+    // Serial.println(pingTime);
+
+    // if (pingTime != 0) {  // if the measure is not overtime
+    //     distance = pingTime * soundVelocity / 2 / 10000;  // calculate the obstacle distance(cm) according to the time of high level returned
+    //     Serial.print(" Distance: ");
+    //     Serial.println(distance);
+    //     // return distance;    // return distance(cm)
+    // }
+    // else                  // if the measure is overtime
+    //     distance = maxDistance;
+        // return maxDistance; // returns the maximum distance(cm)
+    // Serial.println("Not working yet!");
+}
