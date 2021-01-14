@@ -1,18 +1,29 @@
 /***********************************************************
-File name:  AdeeptMotor.cpp
+File name:  SmartCar.cpp
 
-Description:  
-1. Under remote control mode: 
-The car is completely controlled by the remote control. 
-2. Under auto-control mode: 
-The ultrasonic module will keep detecting obstacles in front 
-of the car. When encountering and approaching one, the car will 
-go backward, turn to another angle bypassing the obstacle, and 
-continue to go forward. 
+Description:
+Remote controlled car based on the Adeept Smart Car Kit and AdeeptMotor.ino
 
-Author: Eugen
+The car allows to be operated in 4 modes:
+Mode 1: Remote control mode with joysticks.
+Mode 2: Remote control with tilt sensor.
+Mode 3: Autonomic mode using the ultrasonic distance sensor(s).
+Mode 4: Autonomic line following mode.
+
+Features:
+(x) Mode 1 implemented.
+( ) Mode 2 implemented.
+( ) Mode 3 implemented.
+( ) Mode 4 implemented.
+
+( ) All modes should take use of the ultrasonic distance sensor to prevent collision.
+( ) PID correction of direction.
+( ) Red break lights.
+( ) Orange turn lights.
+( ) ...
+
+Author: Eugen Zimmermann
 Date: 2021/01/09 
-Based on AdeeptMotor.ino by www.adeept.com
 ***********************************************************/
 #include <Arduino.h>
 #include <SPI.h>            // 
@@ -68,7 +79,7 @@ Task tSerialControl(updateIntervalSerial/2, TASK_FOREVER, &serialControl, &taskM
  * Drive modes and general variables
  ********************************************************/
 int mode = 1;
-int automatic = 0;
+int automatic = 0;      // bool if in automatic mode (obsolete?)
 
 const int buzzerPin = 8; // define pin for buzzer
 /*********************************************************/
@@ -85,9 +96,9 @@ byte addresses[6] = "00007"; // define communication address which should corres
 // data[3] = fine tuning joystick U1
 // data[4] = fine tuning joystick U2
 // data[5] = direction Y of joystick U2 (servo of distance sensor)
-// data[6] = data
-// data[7] = data
-// data[8] = data
+// data[6] = data return channel to remote
+// data[7] = data return channel to remote
+// data[8] = data return channel to remote
 int data[9] = {512, 512, 1, 0, 1, 1, 512, 512, 512}; // define array used to save the communication data
 /*********************************************************/
 
@@ -146,23 +157,23 @@ bool calibratedQTR = false;     // shows if calibration was done after switching
  * PID for steering direction
  ********************************************************/
 // create variables for
-double SetpointP1, DirectionMissmatch, DirectionCorrection;
+double directionServoSetpoint, directionMissmatch, directionCorrection;
 
 // define aggressive and conservative PID parameters
 double aggKp = 1.5, aggKi = 50, aggKd = 6;
 double consKp = 2, consKi = 5, consKd = 1;
 
 // create PID objects
-PID myPIDP1(&DirectionMissmatch, &DirectionCorrection, &SetpointP1, consKp, consKi, consKd, DIRECT);
+PID directionPID(&directionMissmatch, &directionCorrection, &directionServoSetpoint, consKp, consKi, consKd, DIRECT);
 /*********************************************************/
 
 /*
  * Servos for direction and ultrasonic sensor
  ********************************************************/
-Servo dirServo;                 // define servo to control turning of smart car
-int dirServoPin = 2;                // define pin for signal line of the last servo
-int dirServoDegree = 78;           //default: 78
-int dirServoOffset = 0;            // define a variable for deviation(degree) of the servo
+Servo directionServo;                   // define servo to control turning of smart car
+const int directionServoPin = 2;        // define pin for signal line of the last servo
+int directionServoDegree = 78;          //default: 78
+int directionServoOffset = 0;           // define a variable for deviation(degree) of the servo
 
 Servo ultrasonicServo;              // define servo to control turning of ultrasonic sensor
 int ultrasonicPin = 3;              // define pin for signal line of the last servo
@@ -209,8 +220,8 @@ void setup()
     radio.openReadingPipe(1, addresses); // open delivery channel
     radio.startListening();              // start monitoring
 
-    dirServo.attach(dirServoPin); // attaches the servo on servoDirPin to the servo object
-    dirServo.write(dirServoDegree + dirServoOffset);
+    directionServo.attach(directionServoPin); // attaches the servo on servoDirPin to the servo object
+    directionServo.write(directionServoDegree + directionServoOffset);
 
     ultrasonicServo.attach(ultrasonicPin); // attaches the servo on ultrasonicPin to the servo object
     ultrasonicServo.write(ultrasonicServoDegree + ultrasonicServoOffset);
@@ -229,9 +240,9 @@ void setup()
     analogWrite(GPin, 0);
 
     // configure PID controller for autonomous mode
-    SetpointP1 = 512.0;
-    myPIDP1.SetOutputLimits(0, 1024);
-    myPIDP1.SetMode(AUTOMATIC);
+    directionServoSetpoint = 512.0;
+    directionPID.SetOutputLimits(0, 1024);
+    directionPID.SetMode(AUTOMATIC);
 
     // configure the line follower sensors
     qtr.setTypeAnalog();
@@ -293,7 +304,7 @@ void readLineFollowerSensor()
     // from 0 to 5000 (for a white line, use readLineWhite() instead)
     uint16_t position = qtr.readLineBlack(sensorValues);
 
-    SetpointP1 = map(position, 0, 5000, 1024, 0);
+    directionServoSetpoint = map(position, 0, 5000, 1024, 0);
 
     // // print the sensor values as numbers from 0 to 1000, where 0 means maximum
     // // reflectance and 1000 means minimum reflectance, followed by the line
@@ -488,7 +499,7 @@ void handleControl() {
         }
 
         // calculate the steering angle of servo according to the direction joystick of remote control and the deviation
-        dirServoDegree = map(data[0], 0, 1023, 135, 45) - (data[3] - 512) / 25;
+        directionServoDegree = map(data[0], 0, 1023, 135, 45) - (data[3] - 512) / 25;
         switch (mode)
         {
             case 1:
@@ -504,11 +515,11 @@ void handleControl() {
         // control the steering and travelling of the smart car
         // if (abs(motorSpeed)>30){
             if (motorDirection == FORWARD && (distanceLeft < 10 || distanceRight < 10))
-                ctrlCar0(dirServoDegree, motorDirection, 0);
+                ctrlCar0(directionServoDegree, motorDirection, 0);
             else if (motorDirection == FORWARD && (distanceLeft < 30 || distanceRight < 30))
-                ctrlCar0(dirServoDegree, motorDirection, min(motorSpeed, 90));
+                ctrlCar0(directionServoDegree, motorDirection, min(motorSpeed, 90));
             else
-                ctrlCar0(dirServoDegree, motorDirection, motorSpeed);
+                ctrlCar0(directionServoDegree, motorDirection, motorSpeed);
         // }
     }
     else {
@@ -608,7 +619,7 @@ void comRF(){
 
 void ctrlCar0(byte dirServoDegree, bool motorDir, int motorSpd) {
     int trimDir = (data[7] - 512) / 25;
-    dirServo.write(dirServoDegree + dirServoOffset);
+    directionServo.write(dirServoDegree + directionServoOffset);
     digitalWrite(dirAPin, motorDir);
     digitalWrite(dirBPin, motorDir);
 
@@ -629,7 +640,7 @@ void ctrlCar0(byte dirServoDegree, bool motorDir, int motorSpd) {
 }
 
 void ctrlCar1(byte dirServoDegree, bool motorDir, int motorSpd) {
-    dirServo.write(dirServoDegree + dirServoOffset);
+    directionServo.write(dirServoDegree + directionServoOffset);
     digitalWrite(dirAPin, motorDir);
     digitalWrite(dirBPin, motorDir);
     // analogWrite(pwmAPin, motorSpd);
@@ -676,15 +687,15 @@ void measureDistance()
 void checkPIDCorrection()
 {
     // check if aggressive of conservative PID parameters are necessary
-    double gapP1 = abs(SetpointP1 - 512);
+    double gapP1 = abs(directionServoSetpoint - 512);
     if (gapP1 < 100)
     { //we're close to setpoint, use conservative tuning parameters
-        myPIDP1.SetTunings(consKp, consKi, consKd);
+        directionPID.SetTunings(consKp, consKi, consKd);
     }
     else
     { //we're far from setpoint, use aggressive tuning parameters
-        myPIDP1.SetTunings(aggKp, aggKi, aggKd);
+        directionPID.SetTunings(aggKp, aggKi, aggKd);
     }
-    myPIDP1.Compute();
+    directionPID.Compute();
     // setPowerP1(BeakerOutputP1);
 }
