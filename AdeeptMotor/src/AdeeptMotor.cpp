@@ -6,12 +6,12 @@ Remote controlled car based on the Adeept Smart Car Kit and AdeeptMotor.ino
 
 The car allows to be operated in 4 modes:
 Mode 1: Remote control mode with joysticks.
-Mode 2: Remote control with tilt sensor.
+Mode 2: Remote control with gyroscope sensor.
 Mode 3: Autonomic mode using the ultrasonic distance sensor(s).
 Mode 4: Autonomic line following mode.
 
 Features:
-(x) Mode 1 implemented.
+( ) Mode 1 implemented.
 ( ) Mode 2 implemented.
 ( ) Mode 3 implemented.
 ( ) Mode 4 implemented.
@@ -90,16 +90,30 @@ const int buzzerPin = 8; // define pin for buzzer
 RF24 radio(9, 53);           // define the object to control NRF24L01
 byte addresses[6] = "00007"; // define communication address which should correspond to remote control
 
-// data[0] = direction Y of joystick U1 (front/back)
+// old structure
+// data[0] = direction Y of joystick U1 (front/back speed) (used as return channel)
 // data[1] = direction X of joystick U2 (left/right)
 // data[2] = mode (1 manual, 2 xxx, 3 manuel with gyroscope, 4 automatic)
 // data[3] = fine tuning joystick U1
 // data[4] = fine tuning joystick U2
 // data[5] = direction Y of joystick U2 (servo of distance sensor)
-// data[6] = data return channel to remote
-// data[7] = data return channel to remote
-// data[8] = data return channel to remote
+// data[6] = data return channel to remote (left distance)
+// data[7] = data return channel to remote (right distance)
+// data[8] = data return channel to remote (speed)
 int data[9] = {512, 512, 1, 0, 1, 1, 512, 512, 512}; // define array used to save the communication data
+
+// future structure
+// data[0] = mode (1 manual joystick, 2 manual gyroscope, 3 automatic ultrasonic sensors, 4 automatic line follower)
+// data[1] = direction X of joystick U1 (not assigned yet) (used as return channel for xy)
+// data[2] = direction Y of joystick U1 (front/back speed) (used as return channel for speed)
+// data[3] = fine tuning joystick U1 (used as return channel xy)
+// data[4] = direction X of joystick U2 (left/right) (used as return channel for direction)
+// data[5] = direction Y of joystick U2 (front buzzer, back not assigned yet) (used as return channel for xy)
+// data[6] = fine tuning joystick U2 (used as return channel for xy)
+// data[7] = data return channel to remote (used as return channel for left distance)
+// data[8] = data return channel to remote (used as return channel for right distance)
+// data[9] = data return channel to remote (used as return channel for line follower sensor value)
+// int data[9] = {1, 512, 512, 0, 512, 512, 0, 0, 0, 0}; // define array used to save the communication data
 /*********************************************************/
 
 /*
@@ -240,7 +254,7 @@ void setup()
     analogWrite(GPin, 0);
 
     // configure PID controller for autonomous mode
-    directionServoSetpoint = 512.0;
+    directionServoSetpoint = 512;
     directionPID.SetOutputLimits(0, 1024);
     directionPID.SetMode(AUTOMATIC);
 
